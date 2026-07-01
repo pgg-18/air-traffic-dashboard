@@ -44,13 +44,7 @@ METRIC_KEYS = {
 # ----------------------------------------------------------------------------
 def parse_annex1(filepath, month, year):
     """Period-format Annex-1 (monthly + April-to-date columns), 7 cols:
-       [Category, month_cur, month_prev, %chg, period_cur, period_prev, %chg].
-
-    Header-vs-data is decided by whether column 1 holds a NUMBER. The old code
-    tested `row[1] is None`, but the 'Total (Domestic +International)' section
-    header comes out of pdfplumber with an EMPTY STRING in column 1, not None,
-    so it was never detected — current_type stayed on 'Domestic' and the grand
-    total rows were mislabelled. Using _to_number(...) is None fixes that."""
+       [Category, month_cur, month_prev, %chg, period_cur, period_prev, %chg]."""
     with pdfplumber.open(filepath) as pdf:
         table = []
         for page in pdf.pages:
@@ -90,21 +84,32 @@ def parse_annex1(filepath, month, year):
             if letters == 'DOMESTIC':
                 current_type = 'Domestic'
                 continue
-            continue  # unrecognised header
+            continue  
 
         if (letters.startswith('TOTAL') or letters.startswith('GRAND TOTAL')
                 or letters.startswith('GENERAL AVIATION')):
-            continue  # section subtotal / GA — excluded so categories sum to the section total
+            continue  
         if current_metric is None or current_type is None:
             continue
+
+        # FIX: Handle merged Cumulative columns (e.g., "14492\n17579")
+        cum_cur, cum_prev = None, None
+        if len(row) > 4 and row[4] is not None:
+            parts = [p.strip() for p in str(row[4]).split('\n') if p.strip()]
+            if len(parts) >= 2:
+                cum_cur = _to_number(parts[0])
+                cum_prev = _to_number(parts[1])
+            else:
+                cum_cur = _to_number(row[4])
+                cum_prev = _to_number(row[5]) if len(row) > 5 else None
 
         rows.append({
             'Month': month, 'Year': year, 'Metric': current_metric, 'Type': current_type,
             'Category': english,
             'Month_Value': v1,
             'Prev_Month_Value': _to_number(row[2]) if len(row) > 2 else None,
-            'Cumulative_Value': _to_number(row[4]) if len(row) > 4 else None,
-            'Prev_Cumulative_Value': _to_number(row[5]) if len(row) > 5 else None,
+            'Cumulative_Value': cum_cur,
+            'Prev_Cumulative_Value': cum_prev,
         })
     return pd.DataFrame(rows)
 
@@ -208,27 +213,39 @@ def parse_annex3(filepath, month, year):
                         current_type = 'Total'; break
             if current_type is None:
                 continue
+            
             for row in table:
-                if row is None or row[0] is None:
+                if not row or not row[0]:
                     continue
-                first = _clean_text(row[0])
-                if row[1] is None and any(x in first for x in [
+                c0 = _clean_text(row[0])
+                
+                # Detect Category Headers
+                if (row[1] is None or _clean_text(row[1]) == '') and any(x in c0 for x in [
                         'INTERNATIONAL AIRPORTS', 'PPP INTERNATIONAL', 'JV INTERNATIONAL',
                         'ST GOVT', 'CUSTOM AIRPORTS', 'DOMESTIC AIRPORTS']):
-                    current_category = first.lstrip('/ ').strip()
+                    current_category = c0.lstrip('/ ').strip()
                     continue
-                if not str(row[0]).strip().isdigit():
-                    continue
-                airport = _clean_text(row[1]).replace('( )', '').strip()
-                if not airport:
-                    continue
-                rows.append({
-                    'Month': month, 'Year': year, 'Airport': airport, 'Pass_Type': current_type,
-                    'Airport_Category': current_category,
-                    'Month_Value': row[2], 'Prev_Month_Value': row[3],
-                    'Cumulative_Value': row[5] if len(row) > 5 else None,
-                    'Prev_Cumulative_Value': row[6] if len(row) > 6 else None,
-                })
+                
+                # FIX: Detect Airport Rows with combined serials (e.g., "1 अमृतसर AMRITSAR")
+                parts = c0.strip().split(' ', 1)
+                serial = parts[0]
+                is_airport_serial = bool(re.match(r'^[A-Za-z]{0,2}\d+$', serial))
+                
+                if is_airport_serial and len(parts) > 1:
+                    raw_name = parts[1]
+                    airport_name = re.sub(r'[^A-Za-z() ]', '', raw_name).replace('( )', '').strip()
+                    if not airport_name:
+                        continue
+                    
+                    rows.append({
+                        'Month': month, 'Year': year, 'Airport': airport_name, 'Pass_Type': current_type,
+                        'Airport_Category': current_category,
+                        'Month_Value': _to_number(row[1]) if len(row) > 1 else None,
+                        'Prev_Month_Value': _to_number(row[2]) if len(row) > 2 else None,
+                        'Cumulative_Value': _to_number(row[4]) if len(row) > 4 else None,
+                        'Prev_Cumulative_Value': _to_number(row[5]) if len(row) > 5 else None,
+                    })
+
     df = pd.DataFrame(rows)
     for c in ['Month_Value', 'Prev_Month_Value', 'Cumulative_Value', 'Prev_Cumulative_Value']:
         if c in df:
