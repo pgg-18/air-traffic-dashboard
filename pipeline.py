@@ -441,38 +441,23 @@ def backfill_historical():
 
 
 def check_and_update():
-    months = ['January', 'February', 'March', 'April', 'May', 'June',
-              'July', 'August', 'September', 'October', 'November', 'December']
-
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT DISTINCT Month, Year FROM monthly_traffic")
-    existing = set(cur.fetchall())
-    conn.close()
-
-    now = datetime.now()
-    current_year = now.year
-
-    for i in range(1,3):
-        month_idx = (now.month - 1 - i) % 12
-        month = months[month_idx]
-        yr = current_year if now.month - i > 0 else current_year - 1
-        fy = f"{yr}-{yr + 1}" if month_idx >= 3 else f"{yr - 1}-{yr}"
-
-        if (month, fy) in existing:
-            continue
-        print(f"Trying {month} {yr}...")
-
-        if fetch_pdf_with_fallback(month, yr, 1, 'temp_annex1.pdf'):
-            try:
-                df1 = parse_annex1('temp_annex1.pdf', month, fy)
-                store_annex1(df1)
-            except Exception as e:
-                print(f"Parse error Annex1 {month} {fy}: {e}")
-
-        if fetch_pdf_with_fallback(month, yr, 3, 'temp_annex3.pdf'):
-            try:
-                df3 = parse_annex3('temp_annex3.pdf', month, fy)
-                store_annex3(df3)
-            except Exception as e:
-                print(f"Parse error Annex3 {month} {fy}: {e}")
+    # HARDCODED URL FOR MAY 2026 - REPLACE THIS WITH THE ACTUAL URL IF YOU HAVE IT
+    # If this fails, the IP is blocked. Stop trying to automate.
+    target_month = "May"
+    target_yr = 2026
+    fy = "2025-2026"
+    
+    # Only one attempt, no loops, no guesses
+    urls = [
+        "https://www.aai.aero/sites/default/files/traffic-news/May2k26Annex1.pdf",
+        "https://www.aai.aero/sites/default/files/traffic-news/May2k26Annex3.pdf"
+    ]
+    
+    # Just try these two files
+    for url in urls:
+        print(f"DEBUG: Trying exact URL: {url}")
+        if fetch_pdf(url, 'temp.pdf'):
+            print("DEBUG: Download success.")
+            # ... process it ...
+        else:
+            print("DEBUG: Download failed. The server blocked us.")
