@@ -453,7 +453,7 @@ def check_and_update():
     now = datetime.now()
     current_year = now.year
 
-    for i in range(3):
+    for i in range(1,3):
         month_idx = (now.month - 1 - i) % 12
         month = months[month_idx]
         yr = current_year if now.month - i > 0 else current_year - 1
