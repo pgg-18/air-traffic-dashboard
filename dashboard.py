@@ -2,13 +2,13 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import sqlite3
-from pipeline import check_and_update
+# from pipeline import check_and_update
 
 st.set_page_config(layout="wide")
 
-if 'updated' not in st.session_state:
-    check_and_update()
-    st.session_state['updated'] = True
+#if 'updated' not in st.session_state:
+ #   check_and_update()
+ #   st.session_state['updated'] = True
 
 st.markdown("""
     <style>
