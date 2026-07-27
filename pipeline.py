@@ -291,6 +291,70 @@ def parse_annex3_old(filepath, month, year):
     return df
 
 
+def parse_annex3_period(filepath, month, year):
+    """Annex-3 parser for the period-format layout AAI started using around
+    May 2026: 8 separate columns [Serial, Airport, MonthCur, MonthPrev, %chg,
+    PeriodCur, PeriodPrev, %chg] — serial and airport name are in SEPARATE
+    cells (unlike parse_annex3's merged-cell assumption), and there's a real
+    April-to-date cumulative pair (unlike parse_annex3_old, which has no
+    period columns at all and just mirrors Month_Value into Cumulative_Value).
+
+    Use this one when parse_annex3 returns an empty/near-empty DataFrame for
+    a given month's PDF — that's the signal AAI's table layout shifted again.
+    Verified against May 2026: sums match the PDF's own Annex-IIIA/B/C Grand
+    Total rows exactly (International 6,147,880 / 11,710,117 cumulative;
+    Domestic 30,832,625 / 59,104,629; Total 36,980,505 / 70,814,746).
+    """
+    rows = []
+    current_type = None
+    current_category = None
+    category_markers = ['INTERNATIONAL AIRPORTS', 'PPP INTERNATIONAL', 'JV INTERNATIONAL',
+                         'ST GOVT', 'CUSTOM AIRPORTS', 'DOMESTIC AIRPORTS']
+    with pdfplumber.open(filepath) as pdf:
+        for page in pdf.pages:
+            table = page.extract_table()
+            if not table:
+                continue
+            for row in table[:3]:
+                if row and row[0]:
+                    text = _clean_text(row[0])
+                    if 'ANNEXURE-III A' in text or 'International Passengers' in text:
+                        current_type = 'International'; break
+                    elif 'ANNEXURE-III B' in text or 'Domestic Passengers' in text:
+                        current_type = 'Domestic'; break
+                    elif 'ANNEXURE-III C' in text or 'Total Passengers' in text:
+                        current_type = 'Total'; break
+            if current_type is None:
+                continue
+            for row in table:
+                if not row or row[0] is None:
+                    continue
+                c0 = _clean_text(row[0])
+                if not c0:
+                    continue
+                if (len(row) < 2 or row[1] is None or _clean_text(row[1]) == '') and \
+                        any(x in c0 for x in category_markers):
+                    current_category = c0.lstrip('/ ').strip()
+                    continue
+                if not c0.strip().isdigit():
+                    continue
+                airport = _clean_text(row[1]).replace('( )', '').strip() if len(row) > 1 else ''
+                if not airport:
+                    continue
+                rows.append({
+                    'Month': month, 'Year': year, 'Airport': airport, 'Pass_Type': current_type,
+                    'Airport_Category': current_category,
+                    'Month_Value': _to_number(row[2]) if len(row) > 2 else None,
+                    'Prev_Month_Value': _to_number(row[3]) if len(row) > 3 else None,
+                    'Cumulative_Value': _to_number(row[5]) if len(row) > 5 else None,
+                    'Prev_Cumulative_Value': _to_number(row[6]) if len(row) > 6 else None,
+                })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.dropna(subset=['Month_Value']).reset_index(drop=True)
+    return df
+
+
 # ----------------------------------------------------------------------------
 # storage
 # ----------------------------------------------------------------------------
